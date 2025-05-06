@@ -41,7 +41,7 @@ class GenerateChartsOperator(BaseOperator):
             df_melted,
             names="Activity",
             values="Hours",
-            title=f"Activity Breakdown for {today_str}"
+            title=f"Daily Productivity Breakdown for {today_str}"
         )
 
         # Ensure output directory exists
@@ -53,7 +53,7 @@ class GenerateChartsOperator(BaseOperator):
         self.log.info(f"Saved daily chart PNG: {png_path}")
 
         # Generate and store interactive HTML
-        chart_html = fig.to_html(full_html=False, include_plotyjs='cdn')
+        chart_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
         cursor = conn.cursor()
         insert_sql = """
@@ -92,7 +92,7 @@ class GenerateChartsOperator(BaseOperator):
         df_melted = df.melt(
             id_vars=["date"],
             value_vars=["working", "programming", "exercise", "leisure"],
-            value_name="Activity",
+            var_name="Activity",
             value_name="Hours"
         )
 
@@ -103,7 +103,7 @@ class GenerateChartsOperator(BaseOperator):
             y="Hours",
             color="Activity",
             barmode="group",
-            title=f"Activity Breakdown for Week Starting {start_of_week_str}"
+            title=f"Weekly Productivity Breakdown for Week Starting {start_of_week_str}"
         )
 
         # Ensure output directory exists
@@ -164,7 +164,7 @@ class GenerateChartsOperator(BaseOperator):
             y="Hours",
             color="Activity",
             markers=True,
-            title=f"Daily Activity Trends for {month_key}"
+            title=f"Daily Productivity Trends for {month_key}"
         )
 
         # Ensure output dir exists

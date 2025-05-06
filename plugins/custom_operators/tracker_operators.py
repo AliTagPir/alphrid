@@ -144,6 +144,3 @@ class TransformAndLoadOperator(BaseOperator):
         #Connect and load processed data to external_alphrid_db (specifically master_tracker_data table)
         self.load_data(row_dict)
         self.log.info("Data was successfully inserted into master_tracker_data table")
-
-
-
