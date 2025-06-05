@@ -8,10 +8,9 @@ from datetime import datetime, timedelta
 
 class GenerateChartsOperator(BaseOperator):
     
-    def __init__(self, pg_conn_id, output_dir, *args, **kwargs):
+    def __init__(self, pg_conn_id, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.pg_conn_id = pg_conn_id
-        self.output_dir = output_dir
 
     def generate_daily_chart(self, conn):
         today = datetime.now().date()
@@ -44,27 +43,21 @@ class GenerateChartsOperator(BaseOperator):
             title=f"Daily Productivity Breakdown for {today_str}"
         )
 
-        # Ensure output directory exists
-        os.makedirs(self.output_dir, exist_ok=True)
-
-        # Save chart as PNG
-        png_path = os.path.join(self.output_dir, f"daily_{today_str}.png")
-        fig.write_image(png_path)
-        self.log.info(f"Saved daily chart PNG: {png_path}")
-
-        # Generate and store interactive HTML
-        chart_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
+        # Generate and store as JSON
+        chart_json = fig.to_json()
 
         cursor = conn.cursor()
         insert_sql = """
-            INSERT INTO chart_cache (chart_key, chart_type, chart_html)
+            INSERT INTO chart_cache (chart_key, chart_type, chart_json)
             VALUES (%s, %s, %s)
             ON CONFLICT (chart_key) DO UPDATE
-            SET chart_html = EXCLUDED.chart_html,
+            SET 
+                chart_type = EXCLUDED.chart_type,
+                chart_json = EXCLUDED.chart_json,
                 last_updated = NOW();
         """
         chart_key = f"daily_{today_str}"
-        cursor.execute(insert_sql, (chart_key, "pie", chart_html))
+        cursor.execute(insert_sql, (chart_key, "pie", chart_json))
         conn.commit()
         cursor.close()
         
@@ -106,30 +99,24 @@ class GenerateChartsOperator(BaseOperator):
             title=f"Weekly Productivity Breakdown for Week Starting {start_of_week_str}"
         )
 
-        # Ensure output directory exists
-        os.makedirs(self.output_dir, exist_ok=True)
-
-        # Save chart as PNG
-        png_path = os.path.join(self.output_dir, f"weekly_chart_{week_key}.png")
-        fig.write_image(png_path)
-        self.log.info(f"Saved weekly chart PNG: {png_path}")
-
-        # Generate and store interactive HTML
-        chart_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
+        # Generate and store JSON
+        chart_json = fig.to_json()
 
         cursor = conn.cursor()
         insert_sql = """
-            INSERT INTO chart_cache (chart_key, chart_type, chart_html)
+            INSERT INTO chart_cache (chart_key, chart_type, chart_json)
             VALUES (%s, %s, %s)
             ON CONFLICT (chart_key) DO UPDATE
-            SET chart_html = EXCLUDED.chart_html,
+            SET 
+                chart_type = EXCLUDED.chart_type,
+                chart_json = EXCLUDED.chart_json,
                 last_updated = NOW();
         """
-        cursor.execute(insert_sql, (week_key, "bar", chart_html))
+        cursor.execute(insert_sql, (week_key, "bar", chart_json))
         conn.commit()
         cursor.close()
 
-        self.log.info(f"Stored weekly chart HTML in chart_cache with key: {week_key}")
+        self.log.info(f"Stored weekly chart JSON in chart_cache with key: {week_key}")
     
     def generate_monthly_chart(self, conn):
         # Determine start of current month
@@ -167,39 +154,35 @@ class GenerateChartsOperator(BaseOperator):
             title=f"Daily Productivity Trends for {month_key}"
         )
 
-        # Ensure output dir exists
-        os.makedirs(self.output_dir, exist_ok=True)
-
-        # Save PNG
-        png_path = os.path.join(self.output_dir, f"monthly_chart_{month_key}.png")
-        fig.write_image(png_path)
-        self.log.info(f"Saved monthly chart PNG: {png_path}")
-
-        # Save HTML version
-        chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+        # Generate and store JSON
+        chart_json = fig.to_json()
 
         cursor = conn.cursor()
         insert_sql = """
-            INSERT INTO chart_cache (chart_key, chart_type, chart_html)
+            INSERT INTO chart_cache (chart_key, chart_type, chart_json)
             VALUES (%s, %s, %s)
             ON CONFLICT (chart_key) DO UPDATE
-            SET chart_html = EXCLUDED.chart_html,
+            SET 
+                chart_type = EXCLUDED.chart_type,
+                chart_json = EXCLUDED.chart_json,
                 last_updated = NOW();
         """
-        cursor.execute(insert_sql, (month_key, "line", chart_html))
+        cursor.execute(insert_sql, (month_key, "line", chart_json))
         conn.commit()
         cursor.close()
 
-        self.log.info(f"Stored monthly chart HTML in chart_cache with key: {month_key}")
+        self.log.info(f"Stored monthly chart JSON in chart_cache with key: {month_key}")
 
     def generate_yearly_chart(self, conn):
+        from calendar import month_abbr  # Standard library for month names
+
         # Calculate first day of the year
         today = datetime.now().date()
         start_of_year = today.replace(month=1, day=1)
         start_of_year_str = start_of_year.strftime("%Y-%m-%d")
         year_key = today.strftime("yearly_%Y")  # e.g., 'yearly_2025'
 
-         # Query all data for the year
+        # Query all data for the year
         query = f"""
             SELECT * FROM master_tracker_data
             WHERE date >= '{start_of_year_str}' AND date <= '{today}'
@@ -209,14 +192,23 @@ class GenerateChartsOperator(BaseOperator):
         if df.empty:
             self.log.info(f"No data found for {year_key}. Skipping yearly chart generation.")
             return
-        
-         # Add a 'month' column (e.g., 'Jan', 'Feb', 'Mar'...)
+
+        # Current month number (1-12)
+        current_month_num = today.month
+        # Month abbreviations up to the current month
+        month_order = list(month_abbr)[1:current_month_num + 1] 
+
+        # Create 'month' column with proper categorical type
         df['month'] = pd.to_datetime(df['date']).dt.strftime("%b")
+        df['month'] = pd.Categorical(df['month'], categories=month_order, ordered=True)
 
         # Aggregate total hours per activity per month
-        df_grouped = df.groupby('month')[["working", "programming", "exercise", "leisure"]].sum().reset_index()
+        df_grouped = df.groupby('month')[["working", "programming", "exercise", "leisure"]].sum()
 
-        # Melt to long format
+        # Fill missing months with 0
+        df_grouped = df_grouped.reindex(month_order, fill_value=0).reset_index()
+
+        # Melt to long format for Plotly
         df_melted = df_grouped.melt(
             id_vars=["month"],
             var_name="Activity",
@@ -233,30 +225,25 @@ class GenerateChartsOperator(BaseOperator):
             title=f"Monthly Activity Trends for {year_key}"
         )
         fig.update_layout(xaxis_type='category')
-        # Ensure output directory exists
-        os.makedirs(self.output_dir, exist_ok=True)
 
-        # Save PNG
-        png_path = os.path.join(self.output_dir, f"yearly_chart_{year_key}.png")
-        fig.write_image(png_path)
-        self.log.info(f"Saved yearly chart PNG: {png_path}")
-
-        # Save HTML version
-        chart_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+        # Generate and store JSON
+        chart_json = fig.to_json()
 
         cursor = conn.cursor()
         insert_sql = """
-            INSERT INTO chart_cache (chart_key, chart_type, chart_html)
+            INSERT INTO chart_cache (chart_key, chart_type, chart_json)
             VALUES (%s, %s, %s)
             ON CONFLICT (chart_key) DO UPDATE
-            SET chart_html = EXCLUDED.chart_html,
+            SET 
+                chart_type = EXCLUDED.chart_type,
+                chart_json = EXCLUDED.chart_json,
                 last_updated = NOW();
         """
-        cursor.execute(insert_sql, (year_key, "line", chart_html))
+        cursor.execute(insert_sql, (year_key, "line", chart_json))
         conn.commit()
         cursor.close()
 
-        self.log.info(f"Stored yearly chart HTML in chart_cache with key: {year_key}")
+        self.log.info(f"Stored yearly chart JSON in chart_cache with key: {year_key}")
 
     def execute(self,context):
         self.log.info("Starting GenerateChartsOperator...")

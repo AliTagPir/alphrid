@@ -1,8 +1,7 @@
 from airflow import DAG
 from datetime import datetime
-from custom_operators.tracker_operators import ExtractGSDataOperator, TransformAndLoadOperator
+from custom_operators.tracker_operators import ExtractGSDataOperator, TransformAndLoadOperator, PurgeOldDailyChartsOperator
 from custom_operators.generate_charts_operator import GenerateChartsOperator
-from utils.email_chart_pngs import send_alphrid_charts_email
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator 
 
@@ -40,19 +39,18 @@ with DAG(
 
     generate_charts_task = GenerateChartsOperator(
         task_id="generate_charts",
-        pg_conn_id="external_alphrid_db",
-        output_dir="/opt/airflow/charts/"
+        pg_conn_id="external_alphrid_db"
     )
 
-    email_charts_task = PythonOperator(
-        task_id="email_charts_pngs",
-        python_callable=send_alphrid_charts_email,
-        op_kwargs={"output_dir": "/opt/airflow/charts/"}
+    purge_old_charts_task = PurgeOldDailyChartsOperator(
+        task_id="purge_old_daily_charts",
+        pg_conn_id="external_alphrid_db",
+        retention_days=14
     )
 
     terminate_dag = EmptyOperator(
         task_id="terminate_dag"
     )
 
-initialise_dag >> extract_task >> transform_and_load_task >> generate_charts_task >> email_charts_task >> terminate_dag
+initialise_dag >> extract_task >> transform_and_load_task >> generate_charts_task >> purge_old_charts_task >> terminate_dag
 

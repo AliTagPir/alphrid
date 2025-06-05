@@ -144,3 +144,33 @@ class TransformAndLoadOperator(BaseOperator):
         #Connect and load processed data to external_alphrid_db (specifically master_tracker_data table)
         self.load_data(row_dict)
         self.log.info("Data was successfully inserted into master_tracker_data table")
+
+class PurgeOldDailyChartsOperator(BaseOperator):
+    def __init__(self, pg_conn_id, retention_days=14, **kwargs):
+        super().__init__(**kwargs)
+        self.pg_conn_id = pg_conn_id
+        self.retention_days = retention_days
+
+    def execute(self, context):
+        
+        hook = PostgresHook(postgres_conn_id=self.pg_conn_id)
+        conn = hook.get_conn()
+        cursor = conn.cursor()
+
+        purge_sql = f"""
+            DELETE FROM chart_cache
+            WHERE chart_key LIKE 'daily_%'
+              AND TO_DATE(SUBSTRING(chart_key FROM 7), 'YYYY-MM-DD') < (CURRENT_DATE - INTERVAL '{self.retention_days} days');
+        """
+
+        self.log.info(f"Purging old daily charts older than {self.retention_days} days...")
+        cursor.execute(purge_sql)
+        rows_deleted = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        if rows_deleted > 0:
+            self.log.info(f"Purged {rows_deleted} old daily chart(s) from chart_cache.")
+        else:
+            self.log.info("No old daily charts found for purging.")
