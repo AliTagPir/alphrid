@@ -1,13 +1,10 @@
 from airflow import DAG
 from airflow.utils.dates import days_ago
 from airflow.operators.empty import EmptyOperator
-from airfow.operators.python import PythonOperator, task
+from airflow.operators.python import PythonOperator, task
 from airflow.models import Variable
 
-from plugins.custom_operators.backfill_charts_operators import (
-    CheckMissingChartsOperator, 
-    GenerateMissingChartsOperator
-)
+from custom_operators.backfill_charts_operators import CheckMissingChartsOperator
 
 default_args = {
     'owner': 'ali',
@@ -32,17 +29,16 @@ with DAG(
         task_id="check_missing_charts"
     )
 
-    @task
-    def generate_missing_chart(chart_key: str):
-        return GenerateMissingChartsOperator(chart_key=chart_key).execute({})
+    # @task
+    # def generate_missing_chart(chart_key: str):
+    #     return GenerateMissingChartsOperator(chart_key=chart_key).execute({})
 
-    daily_tasks = generate_missing_chart.expand(chart_key=check_missing.output['daily'])
-    weekly_tasks = generate_missing_chart.expand(chart_key=check_missing.output['weekly'])
-    monthly_tasks = generate_missing_chart.expand(chart_key=check_missing.output['monthly'])
+    # daily_tasks = generate_missing_chart.expand(chart_key=check_missing.output['daily'])
+    # weekly_tasks = generate_missing_chart.expand(chart_key=check_missing.output['weekly'])
+    # monthly_tasks = generate_missing_chart.expand(chart_key=check_missing.output['monthly'])
 
 
     end = EmptyOperator(task_id="terminate_dag")
 
     start >> check_missing
-    check_missing >> [daily_tasks, weekly_tasks, monthly_tasks]
-    [daily_tasks, weekly_tasks, monthly_tasks] >> end
+    check_missing  >> end

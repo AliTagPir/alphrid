@@ -14,6 +14,7 @@ class CheckMissingChartsOperator(BaseOperator):
         yesterday = today - timedelta(days=1)
         year = yesterday.year
 
+        # Expected daily, Weekly and Monthly chart keys
         expected_daily = {
             f"daily_{d.strftime('%Y-%m-%d')}"
             for d in pd.date_range(yesterday - timedelta(days=13), yesterday)
@@ -40,17 +41,42 @@ class CheckMissingChartsOperator(BaseOperator):
         rows = hook.get_records(sql)
         existing_keys = {row[0] for row in rows}
 
-        # Identify missing chart keys
-        missing_daily = sorted(expected_daily - existing_keys)
-        missing_weekly = sorted(expected_weekly - existing_keys)
-        missing_monthly = sorted(expected_monthly - existing_keys)
+        # Identify missing keys
+        missing_daily = expected_daily - existing_keys
+        missing_weekly = expected_weekly - existing_keys
+        missing_monthly = expected_monthly - existing_keys
 
-        self.log.info(f"Missing daily charts: {missing_daily}")
-        self.log.info(f"Missing weekly charts: {missing_weekly}")
-        self.log.info(f"Missing monthly charts: {missing_monthly}")
+        # Cascade logic
+        cascade_weekly = set()
+        cascade_monthly = set()
 
+        # From missing daily -> week + month
+        for key in missing_daily:
+            date_str = key.replace("daily_", "")
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            iso_week = date_obj.isocalendar()
+            week_key = f"weekly_{iso_week[0]}-W{iso_week[1]:02d}"
+            month_key = f"monthly_{date_obj.year}-{date_obj.month:02d}"
+            cascade_weekly.add(week_key)
+            cascade_monthly.add(month_key)
+        
+        # From missing weekly -> month
+        for key in missing_weekly:
+            parts = key.replace("weekly_", "").split("-W")
+            w_year, w_week = int(parts[0]), int(parts[1])
+            # Approximate ISO week to the monday of that week
+            date_obj = datetime.strptime(f"{w_year}-W{w_week}-1", "%G-W%V-%u").date()
+            month_key = f"monthly_{date_obj.year}-{date_obj.month:02d}"
+            cascade_monthly.add(month_key)
+        
+        # Merge cascade into missing sets
+        missing_weekly |= cascade_weekly
+        missing_monthly |= cascade_monthly
+        
+        # Sort final lists for XCom
         return {
-            "daily": missing_daily,
-            "weekly": missing_weekly,
-            "monthly": missing_monthly
+            "daily": sorted(missing_daily),
+            "weekly": sorted(missing_weekly),
+            "monthly": sorted(missing_monthly),
         }
+
