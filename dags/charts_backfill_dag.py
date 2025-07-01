@@ -4,7 +4,7 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator, task
 from airflow.models import Variable
 
-from custom_operators.backfill_charts_operators import CheckMissingChartsOperator
+from custom_operators.backfill_charts_operators import CheckMissingChartsOperator, GenerateMissingChartsOperator
 
 default_args = {
     'owner': 'ali',
@@ -29,16 +29,27 @@ with DAG(
         task_id="check_missing_charts"
     )
 
-    # @task
-    # def generate_missing_chart(chart_key: str):
-    #     return GenerateMissingChartsOperator(chart_key=chart_key).execute({})
+    @task
+    def extract_chart_keys(chart_dict: dict, chart_type: str):
+        return chart_dict.get(chart_type, [])
+    
+    @task
+    def generate_missing_chart(chart_key: str):
+        op = GenerateMissingChartsOperator(chart_key)
+        return op.execute({})
 
-    # daily_tasks = generate_missing_chart.expand(chart_key=check_missing.output['daily'])
-    # weekly_tasks = generate_missing_chart.expand(chart_key=check_missing.output['weekly'])
-    # monthly_tasks = generate_missing_chart.expand(chart_key=check_missing.output['monthly'])
 
+    daily_keys = extract_chart_keys(chart_dict=check_missing.output, chart_type="daily")
+    weekly_keys = extract_chart_keys(chart_dict=check_missing.output, chart_type="weekly")
+    monthly_keys = extract_chart_keys(chart_dict=check_missing.output, chart_type="monthly")
+
+    daily_tasks = generate_missing_chart.expand(chart_key=daily_keys)
+    weekly_tasks = generate_missing_chart.expand(chart_key=weekly_keys)
+    monthly_tasks = generate_missing_chart.expand(chart_key=monthly_keys)
 
     end = EmptyOperator(task_id="terminate_dag")
 
+
     start >> check_missing
-    check_missing  >> end
+    check_missing >> [daily_tasks, weekly_tasks, monthly_tasks]
+    [daily_tasks, weekly_tasks, monthly_tasks] >> end

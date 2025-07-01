@@ -2,6 +2,14 @@ from airflow.models import BaseOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime, timedelta
 import pandas as pd
+import re
+
+from utils.chart_utils import (
+    generate_daily_chart_for,
+    generate_weekly_chart_for,
+    generate_monthly_chart_for,
+    generate_yearly_chart_for,
+)
 
 class CheckMissingChartsOperator(BaseOperator):
 
@@ -73,6 +81,10 @@ class CheckMissingChartsOperator(BaseOperator):
         missing_weekly |= cascade_weekly
         missing_monthly |= cascade_monthly
         
+        self.log.info(f"Missing daily: {sorted(missing_daily)}")
+        self.log.info(f"Missing weekly: {sorted(missing_weekly)}")
+        self.log.info(f"Missing monthly: {sorted(missing_monthly)}")
+
         # Sort final lists for XCom
         return {
             "daily": sorted(missing_daily),
@@ -80,3 +92,52 @@ class CheckMissingChartsOperator(BaseOperator):
             "monthly": sorted(missing_monthly),
         }
 
+class GenerateMissingChartsOperator(BaseOperator):
+    def __init__(self, chart_key, postgres_conn_id="external_alphrid_db", **kwargs):
+        super().__init__(**kwargs)
+        self.chart_key = chart_key
+        self.postgres_conn_id = postgres_conn_id
+    
+    def execute(self, context):
+        self.log.info(f"Generating chart for key: {self.chart_key}")
+        hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
+        conn = hook.get_conn()
+
+        try:
+            if self.chart_key.startswith("daily_"):
+                date_str = self.chart_key.replace("daily","")
+                date_obj = datetime.strptime(date_str, "")
+                result = generate_daily_chart_for(date_obj, conn)
+            
+            elif self.chart_key.startswith("weekly_"):
+                match = re.match(r"weekly_(\d{4})-W(\d{2})", self.chart_key)
+                if not match:
+                    raise ValueError(f"Invalid weekly chart_key: {self.chart_key}")
+                year, week = map(int, match.group())
+                start_of_week = datetime.strptime(f"{year}-W{week}-1", "%G-W%V-%u").date()
+                result = generate_weekly_chart_for(start_of_week, conn)
+
+            elif self.chart_key.startswith("monthly_"):
+                match = re.match(r"monthly_(\d{4})-(\d{2})", self.chart_key)
+                if not match:
+                    raise ValueError(f"Invalid monthly chart_key: {self.chart_key}")
+                year, month = map(int, match.groups())
+                result = generate_monthly_chart_for(year, month, conn)
+
+            elif self.chart_key.stratswith("yearly_"):
+                year = int(self.chart_key.replace("yearly_",""))
+                result = generate_yearly_chart_for(year, conn)
+            
+            else:
+                raise ValueError(f"Unrecognised chart_key format: {self.chart_key}")
+            
+            self.log.info(result)
+            return result
+            
+        except Exception as e:
+            self.log.error(f"Failed to generate chart for {self.chart_key}: {e}")
+            raise
+
+        finally:
+            conn.close()
+            self.log.info("Database connection closed")
