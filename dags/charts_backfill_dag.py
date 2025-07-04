@@ -4,7 +4,8 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator, task
 from airflow.models import Variable
 
-from custom_operators.backfill_charts_operators import CheckMissingChartsOperator, GenerateMissingChartsOperator
+from custom_operators.backfill_charts_operators import CheckMissingChartsOperator
+from utils.chart_router import run_chart_generation_by_key
 
 default_args = {
     'owner': 'ali',
@@ -35,8 +36,14 @@ with DAG(
     
     @task
     def generate_missing_chart(chart_key: str):
-        op = GenerateMissingChartsOperator(chart_key)
-        return op.execute({})
+        from airflow.providers.postgres.hooks.postgres import PostgresHook
+        hook = PostgresHook(postgres_conn_id="external_alphrid_db")
+        conn = hook.get_conn()
+
+        try:
+            return run_chart_generation_by_key(chart_key, conn)
+        finally:
+            conn.close()
 
 
     daily_keys = extract_chart_keys(chart_dict=check_missing.output, chart_type="daily")
@@ -51,5 +58,8 @@ with DAG(
 
 
     start >> check_missing
-    check_missing >> [daily_tasks, weekly_tasks, monthly_tasks]
+    check_missing >> [daily_keys, weekly_keys, monthly_keys]
+    daily_keys >> daily_tasks
+    weekly_keys >> weekly_tasks
+    monthly_keys >> monthly_tasks
     [daily_tasks, weekly_tasks, monthly_tasks] >> end
