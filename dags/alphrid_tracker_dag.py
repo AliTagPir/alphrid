@@ -53,4 +53,3 @@ with DAG(
     )
 
 initialise_dag >> extract_task >> transform_and_load_task >> generate_charts_task >> purge_old_charts_task >> terminate_dag
-

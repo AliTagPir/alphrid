@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import re
 
-from utils.chart_utils import (
+from utils.chart_util_lib import (
     generate_daily_chart_for,
     generate_weekly_chart_for,
     generate_monthly_chart_for,
